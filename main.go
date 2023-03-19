@@ -3,8 +3,11 @@ package main
 import (
 	"example/api/models"
 	"example/api/storage"
+	"fmt"
 	"log"
 	"os"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"net/http"
 
@@ -20,6 +23,19 @@ type User struct {
 
 type Respository struct {
 	DB *gorm.DB
+}
+
+func HashPassword(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), err
+}
+
+func CheckPasswordH(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
 }
 
 func main() {
@@ -59,6 +75,25 @@ func (r *Respository) SetupRoutes(app *fiber.App) {
 	api.Get(("/showuser"), r.ShowUser)
 	api.Post(("/deluser"), r.DelUser)
 	api.Post(("/updateuser"), r.UpdateUser)
+	api.Post(("/login"), r.Login)
+
+}
+
+func (r *Respository) Login(context *fiber.Ctx) error {
+	user := User{}
+	err := context.BodyParser(&user)
+	if err != nil {
+		return err
+	}
+	var muser User
+	r.DB.Where("username = ?", user.Username).First(&muser)
+	fmt.Println(muser.Password)
+	if CheckPasswordH(user.Password, muser.Password) {
+		context.Status(http.StatusOK)
+		return context.JSON(muser)
+	}
+	context.Status(http.StatusUnauthorized)
+	return context.JSON(fiber.Map{"message": "unauthorized"})
 }
 
 func (r *Respository) UpdateUser(context *fiber.Ctx) error {
@@ -81,7 +116,7 @@ func (r *Respository) DelUser(context *fiber.Ctx) error {
 	err := context.BodyParser(&user)
 	if err != nil {
 		return err
-	}	
+	}
 	err = r.DB.Where("username = ?", user.Username).Delete(&user).Error
 	if err != nil {
 		log.Fatal(err)
@@ -100,11 +135,12 @@ func (r *Respository) ShowUser(context *fiber.Ctx) error {
 
 func (r *Respository) CreateUser(context *fiber.Ctx) error {
 	user := User{}
+
 	err := context.BodyParser(&user)
 	if err != nil {
 		return err
 	}
-
+	user.Password, _ = HashPassword(user.Password)
 	err = r.DB.Create((&user)).Error
 	if err != nil {
 		log.Fatal(err)
