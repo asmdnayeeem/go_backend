@@ -56,7 +56,48 @@ func main() {
 func (r *Respository) SetupRoutes(app *fiber.App) {
 	api := app.Group("/api")
 	api.Post("/create", r.CreateUser)
+	api.Get(("/showuser"), r.ShowUser)
+	api.Post(("/deluser"), r.DelUser)
+	api.Post(("/updateuser"), r.UpdateUser)
 }
+
+func (r *Respository) UpdateUser(context *fiber.Ctx) error {
+	user := User{}
+	err := context.BodyParser(&user)
+	if err != nil {
+		return err
+	}
+	err = r.DB.Where("username = ?", user.Username).Updates(&user).Error
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	context.Status(http.StatusOK)
+	return context.JSON(user)
+}
+
+func (r *Respository) DelUser(context *fiber.Ctx) error {
+	user := User{}
+	err := context.BodyParser(&user)
+	if err != nil {
+		return err
+	}	
+	err = r.DB.Where("username = ?", user.Username).Delete(&user).Error
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	context.Status(http.StatusOK)
+	return context.JSON(user)
+}
+
+func (r *Respository) ShowUser(context *fiber.Ctx) error {
+	var user []User
+	r.DB.Find(&user)
+	context.Status(http.StatusOK)
+	return context.JSON(user)
+}
+
 func (r *Respository) CreateUser(context *fiber.Ctx) error {
 	user := User{}
 	err := context.BodyParser(&user)
