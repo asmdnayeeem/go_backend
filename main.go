@@ -5,14 +5,15 @@ import (
 	"example/api/storage"
 	"fmt"
 	"log"
-	"os"
-
-	"golang.org/x/crypto/bcrypt"
-
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	jwtware "github.com/gofiber/jwt/v3"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/joho/godotenv"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -25,8 +26,11 @@ type Respository struct {
 	DB *gorm.DB
 }
 
+// bcrypt
 func HashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	hash, err := bcrypt.GenerateFromPassword(
+
+		[]byte(password), 14)
 	if err != nil {
 		return "", err
 	}
@@ -71,14 +75,17 @@ func main() {
 
 func (r *Respository) SetupRoutes(app *fiber.App) {
 	api := app.Group("/api")
-	api.Post("/create", r.CreateUser)
-	api.Get(("/showuser"), r.ShowUser)
-	api.Post(("/deluser"), r.DelUser)
-	api.Post(("/updateuser"), r.UpdateUser)
 	api.Post(("/login"), r.Login)
+	api.Use(jwtware.New(jwtware.Config{SigningMethod: "H256", SigningKey: []byte("secret")}))
+	api.Post("/createuser", r.CreateUser)
+	api.Get(("/showuser"), r.ShowUser)
+	api.Post(("/deleteuser"), r.DelUser)
+	api.Post(("/updateuser"), r.UpdateUser)
 
 }
 
+// Controllers
+// login
 func (r *Respository) Login(context *fiber.Ctx) error {
 	user := User{}
 	err := context.BodyParser(&user)
@@ -89,13 +96,33 @@ func (r *Respository) Login(context *fiber.Ctx) error {
 	r.DB.Where("username = ?", user.Username).First(&muser)
 	fmt.Println(muser.Password)
 	if CheckPasswordH(user.Password, muser.Password) {
+
+		claims := jwt.MapClaims{
+			"name": user.Username,
+			"exp":  time.Now().Add(time.Minute * 5).Unix(),
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		t, err := token.SignedString([]byte("secret"))
+		if err != nil {
+			return err
+		}
+
+		cookie := new(fiber.Cookie)
+		cookie.Name = "token"
+		cookie.Value = t
+		cookie.Expires = time.Now().Add(time.Minute * 5)
+		cookie.HTTPOnly = true
+		cookie.Secure = true
+
+		context.Cookie(cookie)
 		context.Status(http.StatusOK)
-		return context.JSON(muser)
+		return context.JSON(t)
 	}
 	context.Status(http.StatusUnauthorized)
 	return context.JSON(fiber.Map{"message": "unauthorized"})
 }
 
+// Update users
 func (r *Respository) UpdateUser(context *fiber.Ctx) error {
 	user := User{}
 	err := context.BodyParser(&user)
@@ -111,6 +138,7 @@ func (r *Respository) UpdateUser(context *fiber.Ctx) error {
 	return context.JSON(user)
 }
 
+// Delete users
 func (r *Respository) DelUser(context *fiber.Ctx) error {
 	user := User{}
 	err := context.BodyParser(&user)
@@ -126,6 +154,7 @@ func (r *Respository) DelUser(context *fiber.Ctx) error {
 	return context.JSON(user)
 }
 
+// Show users
 func (r *Respository) ShowUser(context *fiber.Ctx) error {
 	var user []User
 	r.DB.Find(&user)
@@ -133,6 +162,7 @@ func (r *Respository) ShowUser(context *fiber.Ctx) error {
 	return context.JSON(user)
 }
 
+// Create users
 func (r *Respository) CreateUser(context *fiber.Ctx) error {
 	user := User{}
 
