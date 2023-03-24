@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+
 	"github.com/gofiber/fiber/v2"
 	jwtware "github.com/gofiber/jwt/v3"
 	"github.com/golang-jwt/jwt/v4"
@@ -95,15 +96,25 @@ func (r *Respository) Login(context *fiber.Ctx) error {
 	}
 	var muser User
 	r.DB.Where("username = ?", user.Username).First(&muser)
-	fmt.Println(muser.Password)
 	if CheckPasswordH(user.Password, muser.Password) {
 
 		claims := jwt.MapClaims{
 			"name": user.Username,
 			"exp":  time.Now().Add(time.Minute * 5).Unix(),
 		}
+		rclaims := jwt.MapClaims{
+			"name": user.Username,
+			"exp":  time.Now().Add(time.Hour * 24).Unix(),
+		}
+		//token generation
 		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-		t, err := token.SignedString([]byte("secret"))
+		//refresh token generation
+		refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, rclaims)
+		t, err := token.SignedString([]byte("JWT_SECRET"))
+		if err != nil {
+			return context.SendStatus(fiber.StatusInternalServerError)
+		}
+		tok, err := refreshToken.SignedString([]byte("JWT_SECRET"))
 		if err != nil {
 			return context.SendStatus(fiber.StatusInternalServerError)
 		}
@@ -115,8 +126,16 @@ func (r *Respository) Login(context *fiber.Ctx) error {
 		cookie.Secure = true
 		cookie.SameSite = "lax"
 		context.Cookie(cookie)
+		rcookie := new(fiber.Cookie)
+		rcookie.Name = "refreshtoken"
+		rcookie.Value = tok
+		rcookie.Expires = time.Now().Add(time.Hour * 24)
+		rcookie.HTTPOnly = true
+		rcookie.Secure = true
+		rcookie.SameSite = "lax"
+		context.Cookie(rcookie)
 		context.Status(http.StatusOK)
-		return context.JSON(fiber.Map{"token": t})
+		return context.JSON(fiber.Map{"token": t, "refreshtoken": tok})
 		// return context.JSON(t)
 	}
 	context.Status(http.StatusUnauthorized)
@@ -132,18 +151,19 @@ func (r *Respository) UpdateUser(context *fiber.Ctx) error {
 	if !suser.IsAdmin {
 		return context.JSON("Not Admin")
 	} else {
-	user := User{}
-	err := context.BodyParser(&user)
-	if err != nil {
-		return err
+		user := User{}
+		err := context.BodyParser(&user)
+		if err != nil {
+			return err
+		}
+		err = r.DB.Where("username = ?", user.Username).Updates(&user).Error
+		if err != nil {
+			log.Fatal(err)
+			return err
+		}
+		context.Status(http.StatusOK)
+		return context.JSON(user)
 	}
-	err = r.DB.Where("username = ?", user.Username).Updates(&user).Error
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-	context.Status(http.StatusOK)
-	return context.JSON(user)}
 }
 
 // Delete users
@@ -155,19 +175,19 @@ func (r *Respository) DelUser(context *fiber.Ctx) error {
 	if !suser.IsAdmin {
 		return context.JSON("Not Admin")
 	} else {
-	user := User{}
-	err := context.BodyParser(&user)
-	if err != nil {
-		return err
+		user := User{}
+		err := context.BodyParser(&user)
+		if err != nil {
+			return err
+		}
+		err = r.DB.Where("username = ?", user.Username).Delete(&user).Error
+		if err != nil {
+			log.Fatal(err)
+			return err
+		}
+		context.Status(http.StatusOK)
+		return context.JSON(user)
 	}
-	err = r.DB.Where("username = ?", user.Username).Delete(&user).Error
-	if err != nil {
-		log.Fatal(err)
-		return err
-	}
-	context.Status(http.StatusOK)
-	return context.JSON(user)
-}
 }
 
 // Show users
@@ -204,10 +224,11 @@ func (r *Respository) CreateUser(context *fiber.Ctx) error {
 		return context.JSON(user)
 	}
 }
-//logout
+
+// logout
 func logout(c *fiber.Ctx) error {
 	c.Cookie(&fiber.Cookie{
-		Name: "token",
+		Name:     "token",
 		Expires:  time.Now().Add(-(time.Hour * 2)),
 		HTTPOnly: true,
 		Secure:   true,
@@ -216,5 +237,3 @@ func logout(c *fiber.Ctx) error {
 	return c.JSON("logged out successfully")
 
 }
-
-
